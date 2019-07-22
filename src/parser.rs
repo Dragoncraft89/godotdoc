@@ -166,7 +166,7 @@ pub fn parse_file(name: &str, f: File) -> Result<DocumentationData, String> {
                     }
                     let value = arg_iterator
                         .next()
-                        .and_then(|x| x.parse().ok())
+                        .and_then(|x| x.trim().parse().ok())
                         .unwrap_or(enum_frame.last_value);
 
                     enum_frame.last_value = value + 1;
@@ -174,7 +174,7 @@ pub fn parse_file(name: &str, f: File) -> Result<DocumentationData, String> {
                     enum_frame.values.push(EnumValue {
                         name: name,
                         value: value,
-                        text: Vec::new(),
+                        text: comment_buffer.drain(..).collect(),
                     });
                 }
 
@@ -541,7 +541,7 @@ fn parse_class_content(
             }
             let value = arg_iterator
                 .next()
-                .map(|x| x.trim().parse().unwrap())
+                .and_then(|x| x.trim().parse().ok())
                 .unwrap_or(enum_frame.last_value);
 
             enum_frame.last_value = value + 1;
