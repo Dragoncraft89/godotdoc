@@ -123,3 +123,26 @@ This will be the result:
     ```
     Setter and getter will be visible in the docs as well
     ```
+
+GodotDoc will try to read a file named `godotdoc_config.json` from the source directory.
+This file can provide a project wide configuration of the generated files. This could be an example configuration:
+```json
+{
+    "backend": "markdown",
+    "excluded_files": [
+        "./path/to/secret/directory",
+	"./or/some/pattern/*.gd"
+    ]
+}
+```
+
+This will set the default backend for document generation to markdown (the only available backend for now) and exclude "path/to/secret/directory" and all .gd files in "or/some/pattern" from being processed.
+
+These default values can be overriden by command line arguments, e.g. `--backend=markdown` to set the backend to use (excluded_files can not be set via arguments).
+
+### Installation instructions
+This application is written in rust, therefore you need to install the [Rust toolchain](rustup.rs)
+
+To install this application:
+1. Clone this repository: `git clone https://github.com/Dragoncraft89/godotdoc.git`
+2. Invoke cargo, the rust package manager to install it "cargo install --path godotdoc"
