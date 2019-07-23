@@ -131,21 +131,27 @@ struct EnumFrame {
 enum Mode {
     Normal(ClassFrame),
     Enum(String, EnumFrame),
-    Class(String, u32, ClassFrame, Vec<String>),
+    Class(String, (u32, Option<u32>), ClassFrame, Vec<String>),
 }
 
-pub fn parse_file(name: &str, f: File) -> Result<DocumentationData, String> {
+pub fn parse_file(filename: &str, f: File) -> Result<DocumentationData, String> {
     let mut parsing_mode = vec![Mode::Normal(ClassFrame::default())];
 
     let reader = BufReader::new(f);
     let mut comment_buffer: Vec<String> = Vec::new();
+    let mut lineno = 0;
     for line in reader.lines() {
+        lineno += 1;
         let l = line.map_err(|e| e.to_string())?;
 
         let mut line = l.as_str();
         let indentation_level = get_indentation_level(line);
 
-        if let Some(pos) = find(line, '#') {
+        let open_parentheses = match parsing_mode.last() {
+            Some(Mode::Enum(_, _)) => vec!['{'],
+            _ => Vec::new()
+        };
+        if let Some(pos) = find(filename, lineno, line, '#', open_parentheses)? {
             comment_buffer.push(line[pos + 1..].trim().to_string());
             line = &line[..pos];
         }
@@ -197,16 +203,33 @@ pub fn parse_file(name: &str, f: File) -> Result<DocumentationData, String> {
                 }
             }
 
-            Mode::Class(_, ref mut indent, ref mut frame, _) => {
-                if *indent == 0 {
-                    *indent = indentation_level;
+            Mode::Class(_, (ref old_indent, ref mut indent), ref mut frame, _) => {
+                if line.trim().is_empty() {
+                    break;
                 }
-                if indentation_level == *indent {
-                    if let Some(m) = parse_class_content(&line.trim(), frame, &mut comment_buffer)?
-                    {
+                if indent.is_none() {
+                    if indentation_level > *old_indent {
+                        *indent = Some(indentation_level);
+                    } else {
+                        return Err(format!(
+                            "Failed to parse {}, line {}: Indented block expected",
+                            filename, lineno
+                        ));
+                    }
+                }
+                let indent = indent.unwrap();
+                if indentation_level == indent {
+                    if let Some(m) = parse_class_content(
+                        filename,
+                        lineno,
+                        &line.trim(),
+                        indentation_level,
+                        frame,
+                        &mut comment_buffer,
+                    )? {
                         parsing_mode.push(m);
                     }
-                } else if indentation_level < *indent && line.trim().is_empty() {
+                } else if indentation_level < indent {
                     let mut entries = Vec::new();
                     let comments;
                     let class_name;
@@ -235,7 +258,14 @@ pub fn parse_file(name: &str, f: File) -> Result<DocumentationData, String> {
             }
 
             Mode::Normal(ref mut frame) => {
-                if let Some(new_frame) = parse_class_content(line, frame, &mut comment_buffer)? {
+                if let Some(new_frame) = parse_class_content(
+                    filename,
+                    lineno,
+                    line,
+                    indentation_level,
+                    frame,
+                    &mut comment_buffer,
+                )? {
                     parsing_mode.push(new_frame);
                 }
             }
@@ -288,7 +318,7 @@ pub fn parse_file(name: &str, f: File) -> Result<DocumentationData, String> {
                 add_entries(&mut entries, frame);
 
                 return Ok(DocumentationData {
-                    source_file: name.to_string(),
+                    source_file: filename.to_string(),
                     entries: entries,
                 });
             }
@@ -344,7 +374,10 @@ fn add_entries(entries: &mut Vec<DocumentationEntry>, frame: ClassFrame) {
 }
 
 fn parse_class_content(
+    filename: &str,
+    lineno: u32,
     line: &str,
+    indent: u32,
     frame: &mut ClassFrame,
     comment_buffer: &mut Vec<String>,
 ) -> Result<Option<Mode>, String> {
@@ -354,7 +387,7 @@ fn parse_class_content(
         if !name.starts_with("_") {
             return Ok(Some(Mode::Class(
                 name,
-                0,
+                (indent, None),
                 ClassFrame::default(),
                 comment_buffer.drain(..).collect(),
             )));
@@ -400,6 +433,8 @@ fn parse_class_content(
         let mut setter = None;
         let mut getter = None;
         parse_assignment(
+            filename,
+            lineno,
             &line[4..],
             &mut name,
             &mut value_type,
@@ -427,6 +462,8 @@ fn parse_class_content(
         let mut setter = None;
         let mut getter = None;
         parse_assignment(
+            filename,
+            lineno,
             &line[6..],
             &mut name,
             &mut value_type,
@@ -478,6 +515,8 @@ fn parse_class_content(
         let mut setter = None;
         let mut getter = None;
         parse_assignment(
+            filename,
+            lineno,
             &line[pos + 5..],
             &mut name,
             &mut value_type,
@@ -627,8 +666,8 @@ impl Matcher for StringMatcher {
     }
 }
 
-fn find(s: &str, p: impl Predicate) -> Option<usize> {
-    let mut depth = 0;
+fn find(filename: &str, lineno: u32, s: &str, p: impl Predicate, previous_parentheses: Vec<char>) -> Result<Option<usize>, String> {
+    let mut parentheses = previous_parentheses;
     let mut single_string = false;
     let mut double_string = false;
 
@@ -637,7 +676,7 @@ fn find(s: &str, p: impl Predicate) -> Option<usize> {
 
     let mut matcher = p.into_matcher();
     for i in 0..len {
-        if !single_string && !double_string && depth == 0 {
+        if !single_string && !double_string {
             let mut j = 0;
             while i + j < len {
                 let c = chars[i + j];
@@ -645,7 +684,7 @@ fn find(s: &str, p: impl Predicate) -> Option<usize> {
 
                 match matcher.as_mut().matches(c) {
                     MatchType::FAILURE => break,
-                    MatchType::FINISHED => return Some(i),
+                    MatchType::FINISHED => return Ok(Some(i)),
                     _ => (),
                 }
             }
@@ -654,16 +693,32 @@ fn find(s: &str, p: impl Predicate) -> Option<usize> {
         match chars[i] {
             '"' if !single_string => double_string = true,
             '\'' if !double_string => single_string = true,
-            '(' | '[' | '{' if !single_string && !double_string => depth += 1,
-            ')' | ']' | '}' if !single_string && !double_string => depth -= 1,
+            x if x == '(' || x == '[' || x == '{' => parentheses.push(x),
+            ')' => match parentheses.pop() {
+                Some('(') => (),
+                Some(_) => return Err(format!("Failed to parse {}, line {}: Closing parentheses does not match opening parentheses", filename, lineno)),
+                None => return Err(format!("Failed to parse {}, line {}: extra ')'", filename, lineno))
+            }
+            ']' => match parentheses.pop() {
+                Some('[') => (),
+                Some(_) => return Err(format!("Failed to parse {}, line {}: Closing parentheses does not match opening parentheses", filename, lineno)),
+                None => return Err(format!("Failed to parse {}, line {}: extra ']'", filename, lineno))
+            }
+            '}' => match parentheses.pop() {
+                Some('{') => (),
+                Some(_) => return Err(format!("Failed to parse {}, line {}: Closing parentheses does not match opening parentheses", filename, lineno)),
+                None => return Err(format!("Failed to parse {}, line {}: extra '}}'", filename, lineno))
+            }
             _ => (),
         }
     }
 
-    None
+    Ok(None)
 }
 
 fn parse_assignment(
+    filename: &str,
+    lineno: u32,
     line: &str,
     name: &mut String,
     value_type: &mut Option<String>,
@@ -671,9 +726,9 @@ fn parse_assignment(
     setter: &mut Option<String>,
     getter: &mut Option<String>,
 ) -> Result<(), String> {
-    let assignment_pos: Option<usize> = find(line, '=');
-    let type_pos: Option<usize> = find(line, ':');
-    let setget_pos: Option<usize> = find(line, " setget ");
+    let assignment_pos: Option<usize> = find(filename, lineno, line, '=', Vec::new())?;
+    let type_pos: Option<usize> = find(filename, lineno, line, ':', Vec::new())?;
+    let setget_pos: Option<usize> = find(filename, lineno, line, " setget ", Vec::new())?;
 
     match (assignment_pos, type_pos, setget_pos) {
         (Some(apos), Some(tpos), Some(spos)) if tpos < apos && apos < spos => {
@@ -692,7 +747,12 @@ fn parse_assignment(
                     setter.get_or_insert(set.to_string());
                     getter.get_or_insert(get.to_string());
                 }
-                _ => return Err(format!("Invalid syntax: {}", line)),
+                _ => {
+                    return Err(format!(
+                        "Failed to parse {}, line {}: invalid syntax '{}'",
+                        filename, lineno, line
+                    ))
+                }
             }
             name.clone_from(&line[..tpos].trim().to_string());
             value_type.get_or_insert(line[tpos + 1..apos].trim().to_string());
@@ -719,7 +779,12 @@ fn parse_assignment(
                     setter.get_or_insert(set.to_string());
                     getter.get_or_insert(get.to_string());
                 }
-                _ => return Err(format!("Invalid syntax: {}", line)),
+                _ => {
+                    return Err(format!(
+                        "Failed to parse {}, line {}: invalid syntax '{}'",
+                        filename, lineno, line
+                    ))
+                }
             }
             name.clone_from(&line[..apos].trim().to_string());
             assignment.get_or_insert(line[apos + 1..spos].trim().to_string());
@@ -744,7 +809,12 @@ fn parse_assignment(
                     setter.get_or_insert(set.to_string());
                     getter.get_or_insert(get.to_string());
                 }
-                _ => return Err(format!("Invalid syntax: {}", line)),
+                _ => {
+                    return Err(format!(
+                        "Failed to parse {}, line {}: invalid syntax '{}'",
+                        filename, lineno, line
+                    ))
+                }
             }
             name.clone_from(&line[..tpos].trim().to_string());
             value_type.get_or_insert(line[tpos + 1..spos].trim().to_string());
@@ -769,14 +839,24 @@ fn parse_assignment(
                     setter.get_or_insert(set.to_string());
                     getter.get_or_insert(get.to_string());
                 }
-                _ => return Err(format!("Invalid syntax: {}", line)),
+                _ => {
+                    return Err(format!(
+                        "Failed to parse {}, line {}: invalid syntax '{}'",
+                        filename, lineno, line
+                    ))
+                }
             }
             name.clone_from(&line[..spos].trim().to_string());
         }
         (None, None, None) => {
             name.clone_from(&line.trim().to_string());
         }
-        _ => return Err(format!("Invalid Syntax: {}", line)),
+        _ => {
+            return Err(format!(
+                "Failed to parse {}, line {}: invalid syntax '{}'",
+                filename, lineno, line
+            ))
+        }
     };
 
     Ok(())
