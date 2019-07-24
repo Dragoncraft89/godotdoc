@@ -126,7 +126,7 @@ This will set the default backend for document generation to markdown (the only 
 These default values can be overriden by command line arguments, e.g. `--backend=markdown` to set the backend to use (excluded_files can not be set via arguments).
 
 ### Installation instructions
-This application is written in rust, therefore you need to install the [Rust toolchain](rustup.rs)
+This application is written in rust, therefore you need to install the [Rust toolchain](https://rustup.rs)
 
 To install this application:
 1. Clone this repository: `git clone https://github.com/Dragoncraft89/godotdoc.git`
