@@ -45,12 +45,17 @@ var my_var setget foo, _bar
 You can now invoke `godotdoc /path/to/source/directory -o /path/to/output/directory`
 
 This will be the result:
+
 ## test.gd
 
 ### Classes:  
 * MyClass  
     * **Variables**:  
         * baz  
+        ```
+        One can even comment on individual variables in a class or enum
+        ```
+
         * test  
         ```
         Even comments on the same line as the declaration are honored
@@ -63,27 +68,6 @@ This will be the result:
     Besides functions, one can declare classes, enums, variables, constants
     ```
 
-  
-### Enums:  
-* MyEnum  
-    **Values**:  
-    * FIRST = 0  
-      
-    ```
-    This is the first entry
-    ```
-
-  
-    * SECOND = 1  
-    * GAP = 42  
-      
-    ```
-    Here we have a gap in the numbering
-    ```
-
-  
-    * LAST = 43  
-  
   
 ### Exports:  
 * my\_export: (int, 1, 8) = `5`  
@@ -123,6 +107,7 @@ This will be the result:
     ```
     Setter and getter will be visible in the docs as well
     ```
+
 
 GodotDoc will try to read a file named `godotdoc_config.json` from the source directory.
 This file can provide a project wide configuration of the generated files. This could be an example configuration:

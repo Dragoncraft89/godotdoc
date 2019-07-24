@@ -140,6 +140,7 @@ pub fn parse_file(filename: &str, f: File) -> Result<DocumentationData, String> 
     let reader = BufReader::new(f);
     let mut comment_buffer: Vec<String> = Vec::new();
     let mut lineno = 0;
+    let mut open_parentheses = Vec::new();
     for line in reader.lines() {
         lineno += 1;
         let l = line.map_err(|e| e.to_string())?;
@@ -147,11 +148,9 @@ pub fn parse_file(filename: &str, f: File) -> Result<DocumentationData, String> 
         let mut line = l.as_str();
         let indentation_level = get_indentation_level(line);
 
-        let open_parentheses = match parsing_mode.last() {
-            Some(Mode::Enum(_, _)) => vec!['{'],
-            _ => Vec::new()
-        };
-        if let Some(pos) = find(filename, lineno, line, '#', open_parentheses)? {
+        let (pos, v) = find(filename, lineno, line, '#', open_parentheses)?;
+        open_parentheses = v;
+        if let Some(pos) = pos {
             comment_buffer.push(line[pos + 1..].trim().to_string());
             line = &line[..pos];
         }
@@ -205,7 +204,7 @@ pub fn parse_file(filename: &str, f: File) -> Result<DocumentationData, String> 
 
             Mode::Class(_, (ref old_indent, ref mut indent), ref mut frame, _) => {
                 if line.trim().is_empty() {
-                    break;
+                    continue;
                 }
                 if indent.is_none() {
                     if indentation_level > *old_indent {
@@ -230,6 +229,7 @@ pub fn parse_file(filename: &str, f: File) -> Result<DocumentationData, String> 
                         parsing_mode.push(m);
                     }
                 } else if indentation_level < indent {
+                    println!("{}, {}", filename, lineno);
                     let mut entries = Vec::new();
                     let comments;
                     let class_name;
@@ -666,7 +666,7 @@ impl Matcher for StringMatcher {
     }
 }
 
-fn find(filename: &str, lineno: u32, s: &str, p: impl Predicate, previous_parentheses: Vec<char>) -> Result<Option<usize>, String> {
+fn find(filename: &str, lineno: u32, s: &str, p: impl Predicate, previous_parentheses: Vec<char>) -> Result<(Option<usize>, Vec<char>), String> {
     let mut parentheses = previous_parentheses;
     let mut single_string = false;
     let mut double_string = false;
@@ -684,7 +684,7 @@ fn find(filename: &str, lineno: u32, s: &str, p: impl Predicate, previous_parent
 
                 match matcher.as_mut().matches(c) {
                     MatchType::FAILURE => break,
-                    MatchType::FINISHED => return Ok(Some(i)),
+                    MatchType::FINISHED => return Ok((Some(i), parentheses)),
                     _ => (),
                 }
             }
@@ -713,7 +713,7 @@ fn find(filename: &str, lineno: u32, s: &str, p: impl Predicate, previous_parent
         }
     }
 
-    Ok(None)
+    Ok((None, parentheses))
 }
 
 fn parse_assignment(
@@ -726,9 +726,9 @@ fn parse_assignment(
     setter: &mut Option<String>,
     getter: &mut Option<String>,
 ) -> Result<(), String> {
-    let assignment_pos: Option<usize> = find(filename, lineno, line, '=', Vec::new())?;
-    let type_pos: Option<usize> = find(filename, lineno, line, ':', Vec::new())?;
-    let setget_pos: Option<usize> = find(filename, lineno, line, " setget ", Vec::new())?;
+    let (assignment_pos, _) = find(filename, lineno, line, '=', Vec::new())?;
+    let (type_pos, _) = find(filename, lineno, line, ':', Vec::new())?;
+    let (setget_pos, _) = find(filename, lineno, line, " setget ", Vec::new())?;
 
     match (assignment_pos, type_pos, setget_pos) {
         (Some(apos), Some(tpos), Some(spos)) if tpos < apos && apos < spos => {
