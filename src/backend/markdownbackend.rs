@@ -149,14 +149,14 @@ fn write_symbols(
                         }
                     }
                     SymbolArgs::ClassArgs(entries) => {
-                        write!(f, "  \n{}", prefix)?;
-                        write_symbols(format!("{}{}", prefix, "    "), entries, f)?;
+                        write!(f, "{}", format_comments(&prefix, entry.text))?;
+                        write_symbols(format!("{}{}", prefix, "        "), entries, f)?;
+                        continue;
                     }
                 }
             }
             write!(f, "{}", format_comments(&prefix, entry.text))?;
         }
-        write!(f, "  \n")?;
     }
 
     Ok(())
@@ -264,8 +264,9 @@ impl Backend for MarkdownBackend {
                             }
                         }
                         SymbolArgs::ClassArgs(entries) => {
-                            write!(f, "  \n")?;
+                            write!(f, "  \n{}  \n", format_comments(&"".to_string(), entry.text))?;
                             write_symbols("    ".to_string(), entries, f)?;
+                            continue;
                         }
                     }
                 }

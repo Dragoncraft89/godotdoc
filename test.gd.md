@@ -2,6 +2,12 @@
 
 ### Classes:  
 * MyClass  
+  
+    ```
+    Besides functions, one can declare classes, enums, variables, constants
+    ```
+
+  
     * **Variables**:  
         * baz  
         ```
@@ -12,13 +18,6 @@
         ```
         Even comments on the same line as the declaration are honored
         ```
-
-  
-  
-  
-    ```
-    Besides functions, one can declare classes, enums, variables, constants
-    ```
 
   
 ### Exports:  

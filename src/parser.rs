@@ -229,7 +229,6 @@ pub fn parse_file(filename: &str, f: File) -> Result<DocumentationData, String> 
                         parsing_mode.push(m);
                     }
                 } else if indentation_level < indent {
-                    println!("{}, {}", filename, lineno);
                     let mut entries = Vec::new();
                     let comments;
                     let class_name;
@@ -666,7 +665,13 @@ impl Matcher for StringMatcher {
     }
 }
 
-fn find(filename: &str, lineno: u32, s: &str, p: impl Predicate, previous_parentheses: Vec<char>) -> Result<(Option<usize>, Vec<char>), String> {
+fn find(
+    filename: &str,
+    lineno: u32,
+    s: &str,
+    p: impl Predicate,
+    previous_parentheses: Vec<char>,
+) -> Result<(Option<usize>, Vec<char>), String> {
     let mut parentheses = previous_parentheses;
     let mut single_string = false;
     let mut double_string = false;
