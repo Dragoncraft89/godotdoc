@@ -264,7 +264,11 @@ impl Backend for MarkdownBackend {
                             }
                         }
                         SymbolArgs::ClassArgs(entries) => {
-                            write!(f, "  \n{}  \n", format_comments(&"".to_string(), entry.text))?;
+                            write!(
+                                f,
+                                "  \n{}  \n",
+                                format_comments(&"".to_string(), entry.text)
+                            )?;
                             write_symbols("    ".to_string(), entries, f)?;
                             continue;
                         }

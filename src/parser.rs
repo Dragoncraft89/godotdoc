@@ -4,6 +4,8 @@ use std::io::BufReader;
 
 use std::fmt::{Display, Formatter};
 
+use crate::Settings;
+
 pub enum EntryType {
     CLASS,
     SIGNAL,
@@ -134,7 +136,11 @@ enum Mode {
     Class(String, (u32, Option<u32>), ClassFrame, Vec<String>),
 }
 
-pub fn parse_file(filename: &str, f: File) -> Result<DocumentationData, String> {
+pub fn parse_file(
+    filename: &str,
+    f: File,
+    settings: &Settings,
+) -> Result<DocumentationData, String> {
     let mut parsing_mode = vec![Mode::Normal(ClassFrame::default())];
 
     let reader = BufReader::new(f);
@@ -225,6 +231,7 @@ pub fn parse_file(filename: &str, f: File) -> Result<DocumentationData, String> 
                         indentation_level,
                         frame,
                         &mut comment_buffer,
+                        settings,
                     )? {
                         parsing_mode.push(m);
                     }
@@ -264,6 +271,7 @@ pub fn parse_file(filename: &str, f: File) -> Result<DocumentationData, String> 
                     indentation_level,
                     frame,
                     &mut comment_buffer,
+                    settings,
                 )? {
                     parsing_mode.push(new_frame);
                 }
@@ -379,11 +387,12 @@ fn parse_class_content(
     indent: u32,
     frame: &mut ClassFrame,
     comment_buffer: &mut Vec<String>,
+    settings: &Settings,
 ) -> Result<Option<Mode>, String> {
     if line.starts_with("class ") {
         let name = line[5..].split(':').next().unwrap().trim().to_string();
 
-        if !name.starts_with("_") {
+        if !name.starts_with("_") || settings.show_prefixed {
             return Ok(Some(Mode::Class(
                 name,
                 (indent, None),
@@ -393,7 +402,7 @@ fn parse_class_content(
         }
     } else if line.starts_with("signal ") {
         let name = line[6..].trim().to_string();
-        if !name.starts_with("_") {
+        if !name.starts_with("_") || settings.show_prefixed {
             frame.signals.push(Symbol {
                 name: name,
                 args: None,
@@ -414,7 +423,7 @@ fn parse_class_content(
             &mut return_type,
         )?;
 
-        if !name.starts_with("_") || name == "_init" {
+        if !name.starts_with("_") || name == "_init" || settings.show_prefixed {
             frame.functions.push(Symbol {
                 name: name,
                 args: Some(SymbolArgs::FunctionArgs(FunctionArgStruct {
@@ -442,7 +451,7 @@ fn parse_class_content(
             &mut getter,
         )?;
 
-        if !name.starts_with("_") {
+        if !name.starts_with("_") || settings.show_prefixed {
             frame.variables.push(Symbol {
                 name: name,
                 args: Some(SymbolArgs::VariableArgs(VariableArgStruct {
@@ -471,7 +480,7 @@ fn parse_class_content(
             &mut getter,
         )?;
 
-        if !name.starts_with("_") {
+        if !name.starts_with("_") || settings.show_prefixed {
             frame.constants.push(Symbol {
                 name: name,
                 args: Some(SymbolArgs::VariableArgs(VariableArgStruct {
@@ -524,6 +533,10 @@ fn parse_class_content(
             &mut getter,
         )?;
 
+        if name.starts_with("_") && !settings.show_prefixed {
+            return Ok(None);
+        }
+
         let (export_type, options) = match export_type {
             Some((x, y)) => (Some(x), y),
             None => (None, Vec::new()),
@@ -560,7 +573,7 @@ fn parse_class_content(
         let pos = pos.unwrap();
         let enum_name = line[5..pos].trim().to_string();
 
-        if enum_name.starts_with("_") {
+        if enum_name.starts_with("_") && !settings.show_prefixed {
             return Ok(None);
         }
 
