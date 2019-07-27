@@ -4,6 +4,8 @@ use std::io::BufReader;
 
 use std::fmt::{Display, Formatter};
 
+use crate::Settings;
+
 pub enum EntryType {
     CLASS,
     SIGNAL,
@@ -134,11 +136,16 @@ enum Mode {
     Class(String, (u32, Option<u32>), ClassFrame, Vec<String>),
 }
 
-pub fn parse_file(filename: &str, f: File) -> Result<DocumentationData, String> {
+pub fn parse_file(
+    filename: &str,
+    f: File,
+    settings: &Settings,
+) -> Result<DocumentationData, String> {
     let mut parsing_mode = vec![Mode::Normal(ClassFrame::default())];
 
     let reader = BufReader::new(f);
     let mut comment_buffer: Vec<String> = Vec::new();
+    let mut override_visibility = None;
     let mut lineno = 0;
     let mut open_parentheses = Vec::new();
     for line in reader.lines() {
@@ -151,7 +158,14 @@ pub fn parse_file(filename: &str, f: File) -> Result<DocumentationData, String> 
         let (pos, v) = find(filename, lineno, line, '#', open_parentheses)?;
         open_parentheses = v;
         if let Some(pos) = pos {
-            comment_buffer.push(line[pos + 1..].trim().to_string());
+            let comment = line[pos + 1..].trim();
+            if comment == "[Show]" {
+                override_visibility = Some(true);
+            } else if comment == "[Hide]" {
+                override_visibility = Some(false);
+            } else {
+                comment_buffer.push(comment.to_string());
+            }
             line = &line[..pos];
         }
 
@@ -176,11 +190,15 @@ pub fn parse_file(filename: &str, f: File) -> Result<DocumentationData, String> 
 
                     enum_frame.last_value = value + 1;
 
-                    enum_frame.values.push(EnumValue {
-                        name: name,
-                        value: value,
-                        text: comment_buffer.drain(..).collect(),
-                    });
+                    if (!name.starts_with("_") || settings.show_prefixed)
+                        && override_visibility.unwrap_or(true)
+                    {
+                        enum_frame.values.push(EnumValue {
+                            name: name,
+                            value: value,
+                            text: comment_buffer.drain(..).collect(),
+                        });
+                    }
                 }
 
                 if end.is_some() {
@@ -225,6 +243,8 @@ pub fn parse_file(filename: &str, f: File) -> Result<DocumentationData, String> 
                         indentation_level,
                         frame,
                         &mut comment_buffer,
+                        settings,
+                        &mut override_visibility,
                     )? {
                         parsing_mode.push(m);
                     }
@@ -264,6 +284,8 @@ pub fn parse_file(filename: &str, f: File) -> Result<DocumentationData, String> 
                     indentation_level,
                     frame,
                     &mut comment_buffer,
+                    settings,
+                    &mut override_visibility,
                 )? {
                     parsing_mode.push(new_frame);
                 }
@@ -271,6 +293,7 @@ pub fn parse_file(filename: &str, f: File) -> Result<DocumentationData, String> 
         }
         if !line.is_empty() {
             comment_buffer.clear();
+            override_visibility = None;
         }
     }
 
@@ -379,11 +402,13 @@ fn parse_class_content(
     indent: u32,
     frame: &mut ClassFrame,
     comment_buffer: &mut Vec<String>,
+    settings: &Settings,
+    override_visibility: &mut Option<bool>,
 ) -> Result<Option<Mode>, String> {
     if line.starts_with("class ") {
         let name = line[5..].split(':').next().unwrap().trim().to_string();
 
-        if !name.starts_with("_") {
+        if !name.starts_with("_") || settings.show_prefixed {
             return Ok(Some(Mode::Class(
                 name,
                 (indent, None),
@@ -393,7 +418,8 @@ fn parse_class_content(
         }
     } else if line.starts_with("signal ") {
         let name = line[6..].trim().to_string();
-        if !name.starts_with("_") {
+        if (!name.starts_with("_") || settings.show_prefixed) && override_visibility.unwrap_or(true)
+        {
             frame.signals.push(Symbol {
                 name: name,
                 args: None,
@@ -414,7 +440,8 @@ fn parse_class_content(
             &mut return_type,
         )?;
 
-        if !name.starts_with("_") || name == "_init" {
+        if (!name.starts_with("_") || settings.show_prefixed) && override_visibility.unwrap_or(true)
+        {
             frame.functions.push(Symbol {
                 name: name,
                 args: Some(SymbolArgs::FunctionArgs(FunctionArgStruct {
@@ -442,7 +469,8 @@ fn parse_class_content(
             &mut getter,
         )?;
 
-        if !name.starts_with("_") {
+        if (!name.starts_with("_") || settings.show_prefixed) && override_visibility.unwrap_or(true)
+        {
             frame.variables.push(Symbol {
                 name: name,
                 args: Some(SymbolArgs::VariableArgs(VariableArgStruct {
@@ -471,7 +499,8 @@ fn parse_class_content(
             &mut getter,
         )?;
 
-        if !name.starts_with("_") {
+        if (!name.starts_with("_") || settings.show_prefixed) && override_visibility.unwrap_or(true)
+        {
             frame.constants.push(Symbol {
                 name: name,
                 args: Some(SymbolArgs::VariableArgs(VariableArgStruct {
@@ -524,6 +553,12 @@ fn parse_class_content(
             &mut getter,
         )?;
 
+        if (name.starts_with("_") && !settings.show_prefixed)
+            || !override_visibility.unwrap_or(true)
+        {
+            return Ok(None);
+        }
+
         let (export_type, options) = match export_type {
             Some((x, y)) => (Some(x), y),
             None => (None, Vec::new()),
@@ -560,7 +595,9 @@ fn parse_class_content(
         let pos = pos.unwrap();
         let enum_name = line[5..pos].trim().to_string();
 
-        if enum_name.starts_with("_") {
+        if (enum_name.starts_with("_") && !settings.show_prefixed)
+            || !override_visibility.unwrap_or(true)
+        {
             return Ok(None);
         }
 
@@ -584,11 +621,15 @@ fn parse_class_content(
 
             enum_frame.last_value = value + 1;
 
-            enum_frame.values.push(EnumValue {
-                name: name,
-                value: value,
-                text: Vec::new(),
-            });
+            if (!name.starts_with("_") || settings.show_prefixed)
+                && override_visibility.unwrap_or(true)
+            {
+                enum_frame.values.push(EnumValue {
+                    name: name,
+                    value: value,
+                    text: Vec::new(),
+                });
+            }
         }
 
         if end.is_some() {

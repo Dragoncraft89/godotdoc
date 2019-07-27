@@ -43,12 +43,6 @@
     This comment is a description of the method foo
     ```
 
-* \_init()  
-  
-    ```
-    The only function exempt from this rule is the _init()-function
-    ```
-
   
 ### Variables:  
 * my\_var  

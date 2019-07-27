@@ -1,4 +1,5 @@
 use crate::parser::DocumentationData;
+
 use std::fs::File;
 
 pub trait Backend {

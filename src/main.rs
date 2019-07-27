@@ -37,13 +37,15 @@ fn handle_error<T>(x: Result<T, String>) -> T {
 struct Configuration {
     backend: Option<String>,
     excluded_files: Option<Vec<String>>,
+    show_prefixed: Option<bool>,
 }
 
-struct Settings<'a> {
+pub struct Settings<'a> {
     backend: Box<Backend>,
     output_path: &'a Path,
 
     excluded_files: Vec<Pattern>,
+    show_prefixed: bool,
 }
 
 fn main() {
@@ -65,11 +67,25 @@ fn main() {
                 .value_name("Directory")
                 .required(true),
         )
+        .arg(
+            Arg::with_name("show_prefixed")
+                .help("Show members prefixed with an '_'")
+                .long("show_prefixed"),
+        )
+        .arg(
+            Arg::with_name("hide_prefixed")
+                .help("Hide members prefixed with an '_'")
+                .long("hide_prefixed"),
+        )
         .arg(Arg::with_name("input directory").required(true).index(1))
         .get_matches();
 
     let input_dir = matches.value_of("input directory").unwrap();
     let output_dir = matches.value_of("output").unwrap();
+    let show_prefixed = matches
+        .value_of("show_prefixed")
+        .map(|_| true)
+        .or(matches.value_of("hide_prefixed").map(|_| false));
     let config;
     if let Ok(f) = File::open(Path::new(input_dir).join("godotdoc_config.json")) {
         config = handle_error(
@@ -93,6 +109,7 @@ fn main() {
             .drain(..)
             .map(|s| handle_error(Pattern::new(s.as_str()).map_err(|e| e.to_string())))
             .collect(),
+        show_prefixed: show_prefixed.or(config.show_prefixed).unwrap_or(true),
     };
     handle_error(traverse_directory(
         Path::new(input_dir).to_path_buf(),
@@ -151,7 +168,10 @@ fn traverse_directory(src: PathBuf, output: PathBuf, settings: &Settings) -> Res
             })?;
             settings
                 .backend
-                .generate_output(parse_file(file_name.unwrap(), input)?, &mut output)
+                .generate_output(
+                    parse_file(file_name.unwrap(), input, settings)?,
+                    &mut output,
+                )
                 .map_err(|e| e.to_string())?;
         }
     }

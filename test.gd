@@ -2,13 +2,10 @@
 func foo(id):
 	return id + 42
 
-# This function will not show up, because it is prefixed with an underscore
+# We can exclude functions from showing up
+# [Hide]
 func _bar():
 	return 1337
-
-# The only function exempt from this rule is the _init()-function
-func _init():
-	pass
 
 # Besides functions, one can declare classes, enums, variables, constants
 class MyClass:
