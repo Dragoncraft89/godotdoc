@@ -10,13 +10,10 @@ Consider the following example:
 func foo(id):
 	return id + 42
 
-# This function will not show up, because it is prefixed with an underscore
+# We can exclude functions from showing up
+# [Hide]
 func _bar():
 	return 1337
-
-# The only function exempt from this rule is the _init()-function
-func _init():
-	pass
 
 # Besides functions, one can declare classes, enums, variables, constants
 class MyClass:
@@ -91,12 +88,6 @@ This will be the result:
     This comment is a description of the method foo
     ```
 
-* \_init()  
-  
-    ```
-    The only function exempt from this rule is the _init()-function
-    ```
-
   
 ### Variables:  
 * my\_var  
@@ -116,11 +107,13 @@ This file can provide a project wide configuration of the generated files. This 
     "excluded_files": [
         "./path/to/secret/directory",
 	"./or/some/pattern/*.gd"
-    ]
+    ],
+    "show_prefixed": true
 }
 ```
 
 This will set the default backend for document generation to markdown (the only available backend for now) and exclude "path/to/secret/directory" and all .gd files in "or/some/pattern" from being processed.
+The option "show\_prefixed" controls, wether members prefixed by a "\_" will show up. This can be overridden on a per member basis, via `# [Show]` and `# [Hide]`
 
 These default values can be overriden by command line arguments, e.g. `--backend=markdown` to set the backend to use (excluded_files can not be set via arguments).
 
