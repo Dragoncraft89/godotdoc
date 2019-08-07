@@ -164,6 +164,7 @@ pub fn parse_file(
             } else if comment == "[Hide]" {
                 override_visibility = Some(false);
             } else {
+            if comment.starts_with("warning-ignore:") {
                 comment_buffer.push(comment.to_string());
             }
             line = &line[..pos];
