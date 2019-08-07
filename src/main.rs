@@ -18,16 +18,18 @@ use std::fs::File;
 use std::path::Path;
 use std::path::PathBuf;
 
+use std::fmt::Display;
+
 mod backend;
 mod parser;
 
 use crate::parser::parse_file;
 
-fn handle_error<T>(x: Result<T, String>) -> T {
+fn handle_error<T, R: Display>(x: Result<T, R>, message: &str) -> T {
     match x {
         Ok(y) => y,
         Err(e) => {
-            eprintln!("{}", Red.paint(format!("Error: {}", e)));
+            eprintln!("{}", Red.paint(format!("{}: {}", message, e)));
             ::std::process::exit(1);
         }
     }
@@ -88,17 +90,15 @@ fn main() {
         .or(matches.value_of("hide_prefixed").map(|_| false));
     let config;
     if let Ok(f) = File::open(Path::new(input_dir).join("godotdoc_config.json")) {
-        config = handle_error(
-            serde_json::from_reader(f).map_err(|e| format!("Error config file: {}", e)),
-        );
+        config = handle_error(serde_json::from_reader(f), "Error while reading config file");
     } else {
         config = Configuration::default();
     }
 
     let config_backend = config.backend.as_ref().map(|s| s.as_str());
     let backend: Box<Backend> =
-        handle_error(get_backend(matches.value_of("backend").or(config_backend)));
-
+        handle_error(get_backend(matches.value_of("backend").or(config_backend)), "Error");
+    
     let settings = Settings {
         backend: backend,
         output_path: Path::new(output_dir),
@@ -107,7 +107,7 @@ fn main() {
             .excluded_files
             .unwrap_or(Vec::new())
             .drain(..)
-            .map(|s| handle_error(Pattern::new(s.as_str()).map_err(|e| e.to_string())))
+            .map(|s| handle_error(Pattern::new(s.as_str()).map_err(|e| e.to_string()), "Couldn't parse pattern"))
             .collect(),
         show_prefixed: show_prefixed.or(config.show_prefixed).unwrap_or(true),
     };
@@ -115,7 +115,7 @@ fn main() {
         Path::new(input_dir).to_path_buf(),
         Path::new(".").to_path_buf(),
         &settings,
-    ))
+    ), "Error")
 }
 
 fn get_backend(name: Option<&str>) -> Result<Box<Backend>, String> {

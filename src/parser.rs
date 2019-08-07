@@ -564,21 +564,10 @@ fn parse_class_content(
             None => (None, Vec::new()),
         };
 
-        if let Some(ref type_a) = value_type {
-            if let Some(ref type_b) = export_type {
-                if type_a != type_b {
-                    return Err(format!(
-                        "Export type and variable type do not match: {}",
-                        line
-                    ));
-                }
-            }
-        }
-
         frame.exports.push(Symbol {
             name: name,
             args: Some(SymbolArgs::ExportArgs(ExportArgStruct {
-                value_type: value_type.or(export_type),
+                value_type: export_type.or(value_type),
                 options: options,
                 assignment: assignment,
                 setter: setter,
