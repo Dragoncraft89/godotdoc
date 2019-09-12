@@ -1,6 +1,8 @@
 use std::fs::File;
 use std::io::BufRead;
 use std::io::BufReader;
+use std::io::Lines;
+use std::io::Read;
 
 use std::fmt::{Display, Formatter};
 
@@ -101,6 +103,36 @@ pub struct DocumentationData {
     pub entries: Vec<DocumentationEntry>,
 }
 
+struct FileIterator<R: Read> {
+    reader: Lines<BufReader<R>>,
+    lineno: u32
+}
+
+impl<R: Read> FileIterator<R> {
+    fn new(r: R) -> FileIterator<R> {
+        FileIterator {
+            reader: BufReader::new(r).lines(),
+            lineno: 0
+        }
+    }
+
+    fn lineno(&self) -> u32 {
+        self.lineno
+    }
+}
+
+impl<R: Read> Iterator for FileIterator<R> {
+    type Item = Result<String, String>;
+
+    fn next(&mut self) -> Option<Result<String, String>> {
+        if let Some(x) = self.reader.next() {
+            self.lineno += 1;
+            return Some(x.map_err(|e| e.to_string()));
+        }
+        None
+    }
+}
+
 fn get_indentation_level(s: &str) -> u32 {
     let mut i = 0;
     for c in s.chars() {
@@ -143,19 +175,26 @@ pub fn parse_file(
 ) -> Result<DocumentationData, String> {
     let mut parsing_mode = vec![Mode::Normal(ClassFrame::default())];
 
-    let reader = BufReader::new(f);
     let mut comment_buffer: Vec<String> = Vec::new();
     let mut override_visibility = None;
-    let mut lineno = 0;
     let mut open_parentheses = Vec::new();
-    for line in reader.lines() {
-        lineno += 1;
-        let l = line.map_err(|e| e.to_string())?;
+
+    let mut lines = FileIterator::new(f);
+    while let Some(line) = lines.next() {
+        let mut l = line?;
+        while l.ends_with("\\") && !l.contains('#') {
+            l.remove(l.len() - 1);
+            if let Some(line) = lines.next() {
+                l += line?.as_str();
+            } else {
+                return Err("Unexpected eof, expected newline after \\".to_string());
+            }
+        }
 
         let mut line = l.as_str();
         let indentation_level = get_indentation_level(line);
 
-        let (pos, v) = find(filename, lineno, line, '#', open_parentheses)?;
+        let (pos, v) = find(filename, lines.lineno(), line, '#', open_parentheses)?;
         open_parentheses = v;
         if let Some(pos) = pos {
             let comment = line[pos + 1..].trim();
@@ -163,7 +202,7 @@ pub fn parse_file(
                 override_visibility = Some(true);
             } else if comment == "[Hide]" {
                 override_visibility = Some(false);
-            } else {
+            }
             if comment.starts_with("warning-ignore:") {
                 comment_buffer.push(comment.to_string());
             }
@@ -231,7 +270,7 @@ pub fn parse_file(
                     } else {
                         return Err(format!(
                             "Failed to parse {}, line {}: Indented block expected",
-                            filename, lineno
+                            filename, lines.lineno()
                         ));
                     }
                 }
@@ -239,7 +278,7 @@ pub fn parse_file(
                 if indentation_level == indent {
                     if let Some(m) = parse_class_content(
                         filename,
-                        lineno,
+                        lines.lineno(),
                         &line.trim(),
                         indentation_level,
                         frame,
@@ -280,7 +319,7 @@ pub fn parse_file(
             Mode::Normal(ref mut frame) => {
                 if let Some(new_frame) = parse_class_content(
                     filename,
-                    lineno,
+                    lines.lineno(),
                     line,
                     indentation_level,
                     frame,
@@ -643,17 +682,17 @@ enum MatchType {
 }
 
 trait Predicate {
-    fn into_matcher(self) -> Box<Matcher>;
+    fn into_matcher(self) -> Box<dyn Matcher>;
 }
 
 impl Predicate for char {
-    fn into_matcher(self) -> Box<Matcher> {
+    fn into_matcher(self) -> Box<dyn Matcher> {
         Box::new(self)
     }
 }
 
 impl Predicate for &str {
-    fn into_matcher(self) -> Box<Matcher> {
+    fn into_matcher(self) -> Box<dyn Matcher> {
         Box::new(StringMatcher {
             index: 0,
             chars: self.chars().collect(),

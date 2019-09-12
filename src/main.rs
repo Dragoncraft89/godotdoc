@@ -43,7 +43,7 @@ struct Configuration {
 }
 
 pub struct Settings<'a> {
-    backend: Box<Backend>,
+    backend: Box<dyn Backend>,
     output_path: &'a Path,
 
     excluded_files: Vec<Pattern>,
@@ -96,7 +96,7 @@ fn main() {
     }
 
     let config_backend = config.backend.as_ref().map(|s| s.as_str());
-    let backend: Box<Backend> =
+    let backend: Box<dyn Backend> =
         handle_error(get_backend(matches.value_of("backend").or(config_backend)), "Error");
     
     let settings = Settings {
@@ -118,7 +118,7 @@ fn main() {
     ), "Error")
 }
 
-fn get_backend(name: Option<&str>) -> Result<Box<Backend>, String> {
+fn get_backend(name: Option<&str>) -> Result<Box<dyn Backend>, String> {
     match name {
         Some("markdown") | None => Ok(Box::new(MarkdownBackend::new())),
         _ => Err("Unsupported backend".to_string()),
