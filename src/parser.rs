@@ -105,14 +105,14 @@ pub struct DocumentationData {
 
 struct FileIterator<R: Read> {
     reader: Lines<BufReader<R>>,
-    lineno: u32
+    lineno: u32,
 }
 
 impl<R: Read> FileIterator<R> {
     fn new(r: R) -> FileIterator<R> {
         FileIterator {
             reader: BufReader::new(r).lines(),
-            lineno: 0
+            lineno: 0,
         }
     }
 
@@ -143,6 +143,21 @@ fn get_indentation_level(s: &str) -> u32 {
     }
 
     return i;
+}
+
+fn get_comment<'a>(
+    filename: &str,
+    lineno: u32,
+    line: &'a str,
+    parentheses: &mut Vec<char>,
+) -> Result<(&'a str, Option<&'a str>), String> {
+    let pos = find(filename, lineno, line, '#', parentheses)?;
+
+    if let Some(pos) = pos {
+        return Ok((line[..pos].trim_end(), Some(line[pos + 1..].trim())));
+    }
+
+    Ok((line, None))
 }
 
 #[derive(Default)]
@@ -180,53 +195,82 @@ pub fn parse_file(
     let mut open_parentheses = Vec::new();
 
     let mut lines = FileIterator::new(f);
-    while let Some(line) = lines.next() {
-        let mut l = line?;
-        while l.ends_with("\\") && !l.contains('#') {
-            l.remove(l.len() - 1);
-            if let Some(line) = lines.next() {
-                l += line?.as_str();
-            } else {
-                return Err("Unexpected eof, expected newline after \\".to_string());
+    while let Some(mut current_line) = lines.next() {
+        let mut full_line: String = String::new();
+
+        // Parse the full statement with normal opening parentheses '(' all closed
+        loop {
+            let mut partial_line = current_line?;
+
+            // Backslashes at the end of a line ignore the newline
+            while partial_line.ends_with("\\") && !partial_line.contains('#') {
+                partial_line.remove(partial_line.len() - 1);
+                partial_line += &lines
+                    .next()
+                    .ok_or("Unexpected eof, expected newline after \\".to_string())??
+                    .as_str()
+                    .trim()
             }
+            let (partial_line, comment) = get_comment(
+                filename,
+                lines.lineno(),
+                &partial_line,
+                &mut open_parentheses,
+            )?;
+
+            if let Some(comment) = comment {
+                override_visibility = match comment {
+                    "[Show]" => Some(true),
+                    "[Hide]" => Some(false),
+                    _ => override_visibility,
+                };
+                if !comment.starts_with("warning-ignore:") {
+                    comment_buffer.push(comment.to_string());
+                }
+            }
+
+            full_line += &partial_line;
+
+            if !open_parentheses.contains(&'(') {
+                break;
+            }
+
+            current_line = lines
+                .next()
+                .ok_or("Unexpected eof, mismatched parentheses".to_string())?
+                .map(|x| x.trim().to_string());
         }
 
-        let mut line = l.as_str();
-        let indentation_level = get_indentation_level(line);
-
-        let (pos, v) = find(filename, lines.lineno(), line, '#', open_parentheses)?;
-        open_parentheses = v;
-        if let Some(pos) = pos {
-            let comment = line[pos + 1..].trim();
-            if comment == "[Show]" {
-                override_visibility = Some(true);
-            } else if comment == "[Hide]" {
-                override_visibility = Some(false);
-            }
-            if !comment.starts_with("warning-ignore:") {
-                comment_buffer.push(comment.to_string());
-            }
-            line = &line[..pos];
-        }
-
+        let indentation_level = get_indentation_level(full_line.as_str());
         match parsing_mode.last_mut().unwrap() {
             Mode::Enum(ref name, ref mut enum_frame) => {
-                let end = line.find('}');
+                let end = full_line.find('}');
                 let slice = match end {
-                    Some(x) => &line[..x],
-                    None => &line,
+                    Some(x) => &full_line[..x],
+                    None => &full_line,
                 };
                 for v in slice.split(',') {
                     let mut arg_iterator = v.split('=');
 
-                    let name = arg_iterator.next().unwrap().trim().to_string();
+                    let name = arg_iterator.next().ok_or("Expected name for enum value")?.trim();
                     if name.is_empty() {
                         continue;
                     }
                     let value = arg_iterator
                         .next()
-                        .and_then(|x| x.trim().parse().ok())
-                        .unwrap_or(enum_frame.last_value);
+                        .and_then(|x| {
+                            let raw = x.trim();
+                            let res = raw.parse();
+                            if let Err(_) = res {
+                                // TODO:
+                                // Try to resolve it from a constant value
+
+                                return Some(Err(format!("'{}' is not a valid enum value", x.trim())));
+                            }
+
+                            Some(Ok(res.unwrap()))
+                        })
+                        .unwrap_or(Ok(enum_frame.last_value))?;
 
                     enum_frame.last_value = value + 1;
 
@@ -234,7 +278,7 @@ pub fn parse_file(
                         && override_visibility.unwrap_or(true)
                     {
                         enum_frame.values.push(EnumValue {
-                            name: name,
+                            name: name.to_string(),
                             value: value,
                             text: comment_buffer.drain(..).collect(),
                         });
@@ -261,7 +305,7 @@ pub fn parse_file(
             }
 
             Mode::Class(_, (ref old_indent, ref mut indent), ref mut frame, _) => {
-                if line.trim().is_empty() {
+                if full_line.trim().is_empty() {
                     continue;
                 }
                 if indent.is_none() {
@@ -270,7 +314,8 @@ pub fn parse_file(
                     } else {
                         return Err(format!(
                             "Failed to parse {}, line {}: Indented block expected",
-                            filename, lines.lineno()
+                            filename,
+                            lines.lineno()
                         ));
                     }
                 }
@@ -279,7 +324,7 @@ pub fn parse_file(
                     if let Some(m) = parse_class_content(
                         filename,
                         lines.lineno(),
-                        &line.trim(),
+                        &full_line.trim(),
                         indentation_level,
                         frame,
                         &mut comment_buffer,
@@ -320,7 +365,7 @@ pub fn parse_file(
                 if let Some(new_frame) = parse_class_content(
                     filename,
                     lines.lineno(),
-                    line,
+                    full_line.as_str(),
                     indentation_level,
                     frame,
                     &mut comment_buffer,
@@ -331,7 +376,7 @@ pub fn parse_file(
                 }
             }
         }
-        if !line.is_empty() {
+        if !full_line.is_empty() {
             comment_buffer.clear();
             override_visibility = None;
         }
@@ -740,9 +785,8 @@ fn find(
     lineno: u32,
     s: &str,
     p: impl Predicate,
-    previous_parentheses: Vec<char>,
-) -> Result<(Option<usize>, Vec<char>), String> {
-    let mut parentheses = previous_parentheses;
+    parentheses: &mut Vec<char>,
+) -> Result<Option<usize>, String> {
     let mut single_string = false;
     let mut double_string = false;
 
@@ -759,7 +803,7 @@ fn find(
 
                 match matcher.as_mut().matches(c) {
                     MatchType::FAILURE => break,
-                    MatchType::FINISHED => return Ok((Some(i), parentheses)),
+                    MatchType::FINISHED => return Ok(Some(i)),
                     _ => (),
                 }
             }
@@ -788,7 +832,7 @@ fn find(
         }
     }
 
-    Ok((None, parentheses))
+    Ok(None)
 }
 
 fn parse_assignment(
@@ -801,9 +845,9 @@ fn parse_assignment(
     setter: &mut Option<String>,
     getter: &mut Option<String>,
 ) -> Result<(), String> {
-    let (assignment_pos, _) = find(filename, lineno, line, '=', Vec::new())?;
-    let (type_pos, _) = find(filename, lineno, line, ':', Vec::new())?;
-    let (setget_pos, _) = find(filename, lineno, line, " setget ", Vec::new())?;
+    let assignment_pos = find(filename, lineno, line, '=', &mut Vec::new())?;
+    let type_pos = find(filename, lineno, line, ':', &mut Vec::new())?;
+    let setget_pos = find(filename, lineno, line, " setget ", &mut Vec::new())?;
 
     match (assignment_pos, type_pos, setget_pos) {
         (Some(apos), Some(tpos), Some(spos)) if tpos < apos && apos < spos => {
