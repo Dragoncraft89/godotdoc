@@ -252,7 +252,10 @@ pub fn parse_file(
                 for v in slice.split(',') {
                     let mut arg_iterator = v.split('=');
 
-                    let name = arg_iterator.next().ok_or("Expected name for enum value")?.trim();
+                    let name = arg_iterator
+                        .next()
+                        .ok_or("Expected name for enum value")?
+                        .trim();
                     if name.is_empty() {
                         continue;
                     }
@@ -265,7 +268,10 @@ pub fn parse_file(
                                 // TODO:
                                 // Try to resolve it from a constant value
 
-                                return Some(Err(format!("'{}' is not a valid enum value", x.trim())));
+                                return Some(Err(format!(
+                                    "'{}' is not a valid enum value",
+                                    x.trim()
+                                )));
                             }
 
                             Some(Ok(res.unwrap()))
@@ -684,14 +690,28 @@ fn parse_class_content(
         for v in slice.split(',') {
             let mut arg_iterator = v.split('=');
 
-            let name = arg_iterator.next().unwrap().trim().to_string();
-            if name.trim().is_empty() {
+            let name = arg_iterator
+                .next()
+                .ok_or("Expected name for enum value")?
+                .trim();
+            if name.is_empty() {
                 continue;
             }
             let value = arg_iterator
                 .next()
-                .and_then(|x| x.trim().parse().ok())
-                .unwrap_or(enum_frame.last_value);
+                .and_then(|x| {
+                    let raw = x.trim();
+                    let res = raw.parse();
+                    if let Err(_) = res {
+                        // TODO:
+                        // Try to resolve it from a constant value
+
+                        return Some(Err(format!("'{}' is not a valid enum value", x.trim())));
+                    }
+
+                    Some(Ok(res.unwrap()))
+                })
+                .unwrap_or(Ok(enum_frame.last_value))?;
 
             enum_frame.last_value = value + 1;
 
@@ -699,7 +719,7 @@ fn parse_class_content(
                 && override_visibility.unwrap_or(true)
             {
                 enum_frame.values.push(EnumValue {
-                    name: name,
+                    name: name.to_string(),
                     value: value,
                     text: Vec::new(),
                 });
