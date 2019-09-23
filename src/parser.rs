@@ -183,6 +183,222 @@ enum Mode {
     Class(String, (u32, Option<u32>), ClassFrame, Vec<String>),
 }
 
+fn get_constant(stack: &Vec<Mode>, raw: &str) -> Option<String> {
+    let mut val = None;
+    for frame in stack {
+        match frame {
+            Mode::Class(_, _, class_frame, _) | Mode::Normal(class_frame) => {
+                for v in &class_frame.constants {
+                    if v.name == raw {
+                        for arg in &v.args {
+                            match arg {
+                                SymbolArgs::VariableArgs(VariableArgStruct {
+                                    assignment, ..
+                                }) => val = assignment.clone(),
+                                _ => {}
+                            };
+                        }
+                    }
+                }
+            }
+            _ => {}
+        }
+    }
+
+    val
+}
+
+fn parse_enum(
+    settings: &Settings,
+    stack: &Vec<Mode>,
+    values: &str,
+    enum_frame: &mut EnumFrame,
+    override_visibility: &mut Option<bool>,
+    comment_buffer: &mut Vec<String>,
+) -> Result<(), String> {
+    for v in values.split(',') {
+        let mut arg_iterator = v.split('=');
+
+        let name = arg_iterator
+            .next()
+            .ok_or("Expected name for enum value")?
+            .trim();
+        if name.is_empty() {
+            continue;
+        }
+        let value = arg_iterator
+            .next()
+            .and_then(|x| {
+                let raw = x.trim();
+                let res = raw.parse();
+                if let Err(_) = res {
+                    let val = get_constant(stack, raw);
+
+                    if let Some(v) = val {
+                        return Some(v.parse().map_err(|_| {
+                            format!(
+                                "Constant '{}' of value '{}' is not a valid enum value",
+                                raw, v
+                            )
+                        }));
+                    }
+
+                    return Some(Err(format!("'{}' is not a valid enum value", raw)));
+                }
+
+                Some(Ok(res.unwrap()))
+            })
+            .unwrap_or(Ok(enum_frame.last_value))?;
+
+        enum_frame.last_value = value + 1;
+
+        if (!name.starts_with("_") || settings.show_prefixed) && override_visibility.unwrap_or(true)
+        {
+            enum_frame.values.push(EnumValue {
+                name: name.to_string(),
+                value: value,
+                text: comment_buffer.drain(..).collect(),
+            });
+        }
+    }
+
+    Ok(())
+}
+
+fn parse_line(
+    filename: &str,
+    lineno: u32,
+    settings: &Settings,
+    mut mode: Mode,
+    stack: &mut Vec<Mode>,
+    line: String,
+    override_visibility: &mut Option<bool>,
+    comment_buffer: &mut Vec<String>,
+    indentation_level: u32,
+) -> Result<(), String> {
+    match mode {
+        Mode::Enum(ref name, ref mut enum_frame) => {
+            let end = line.find('}');
+            let slice = match end {
+                Some(x) => &line[..x],
+                None => &line,
+            };
+
+            parse_enum(
+                settings,
+                stack,
+                slice,
+                enum_frame,
+                override_visibility,
+                comment_buffer,
+            )?;
+
+            if end.is_some() {
+                let name_string = name.to_string();
+                let values = enum_frame.values.drain(..).collect();
+                match stack.last_mut() {
+                    Some(Mode::Normal(ref mut frame))
+                    | Some(Mode::Class(_, _, ref mut frame, _)) => frame.enums.push(Symbol {
+                        name: name_string,
+                        args: Some(SymbolArgs::EnumArgs(values)),
+                        text: comment_buffer.drain(..).collect(),
+                    }),
+                    Some(Mode::Enum(_, _)) => {
+                        panic!("[parser.rs] Unexpected Enum value after completed enum")
+                    }
+                    None => panic!("[parser.rs] Unexpected end of parsing_mode stack"),
+                }
+            } else {
+                stack.push(mode);
+            }
+        }
+
+        Mode::Class(ref mut name, (ref old_indent, ref mut indent), ref mut frame, _) => {
+            if indent.is_none() {
+                if indentation_level > *old_indent {
+                    *indent = Some(indentation_level);
+                } else {
+                    return Err(format!(
+                        "Failed to parse {}, line {}: Indented block expected",
+                        filename, lineno
+                    ));
+                }
+            }
+            let indent = indent.unwrap();
+            if indentation_level == indent {
+                let new_frame = parse_class_content(
+                    filename,
+                    lineno,
+                    &line.trim(),
+                    indentation_level,
+                    frame,
+                    comment_buffer,
+                    settings,
+                    override_visibility,
+                    &stack,
+                )?;
+                stack.push(mode);
+                if let Some(new_frame) = new_frame {
+                    stack.push(new_frame);
+                }
+            } else if indentation_level < indent {
+                let mut entries = Vec::new();
+                let name = name.to_string();
+                let (frame, comments) = match mode {
+                    Mode::Class(_, _, frame, comments) => (frame, comments),
+                    _ => panic!(),
+                };
+                add_entries(&mut entries, frame);
+
+                match stack.last_mut() {
+                    Some(Mode::Normal(ref mut frame))
+                    | Some(Mode::Class(_, _, ref mut frame, _)) => frame.classes.push(Symbol {
+                        name: name,
+                        args: Some(SymbolArgs::ClassArgs(entries)),
+                        text: comments,
+                    }),
+                    Some(Mode::Enum(_, _)) => {
+                        panic!("[parser.rs] Unexpected Enum value after completed class")
+                    }
+                    None => panic!("[parser.rs] Unexpected end of parsing_mode stack"),
+                }
+
+                return parse_line(
+                    filename,
+                    lineno,
+                    settings,
+                    stack.pop().unwrap(),
+                    stack,
+                    line,
+                    override_visibility,
+                    comment_buffer,
+                    indentation_level,
+                );
+            }
+        }
+
+        Mode::Normal(ref mut frame) => {
+            let new_frame = parse_class_content(
+                filename,
+                lineno,
+                line.as_str(),
+                indentation_level,
+                frame,
+                comment_buffer,
+                settings,
+                override_visibility,
+                &stack,
+            )?;
+            stack.push(mode);
+            if let Some(new_frame) = new_frame {
+                stack.push(new_frame);
+            }
+        }
+    }
+
+    Ok(())
+}
+
 pub fn parse_file(
     filename: &str,
     f: File,
@@ -242,147 +458,18 @@ pub fn parse_file(
         }
 
         let indentation_level = get_indentation_level(full_line.as_str());
-        match parsing_mode.last_mut().unwrap() {
-            Mode::Enum(ref name, ref mut enum_frame) => {
-                let end = full_line.find('}');
-                let slice = match end {
-                    Some(x) => &full_line[..x],
-                    None => &full_line,
-                };
-                for v in slice.split(',') {
-                    let mut arg_iterator = v.split('=');
-
-                    let name = arg_iterator
-                        .next()
-                        .ok_or("Expected name for enum value")?
-                        .trim();
-                    if name.is_empty() {
-                        continue;
-                    }
-                    let value = arg_iterator
-                        .next()
-                        .and_then(|x| {
-                            let raw = x.trim();
-                            let res = raw.parse();
-                            if let Err(_) = res {
-                                // TODO:
-                                // Try to resolve it from a constant value
-
-                                return Some(Err(format!(
-                                    "'{}' is not a valid enum value",
-                                    x.trim()
-                                )));
-                            }
-
-                            Some(Ok(res.unwrap()))
-                        })
-                        .unwrap_or(Ok(enum_frame.last_value))?;
-
-                    enum_frame.last_value = value + 1;
-
-                    if (!name.starts_with("_") || settings.show_prefixed)
-                        && override_visibility.unwrap_or(true)
-                    {
-                        enum_frame.values.push(EnumValue {
-                            name: name.to_string(),
-                            value: value,
-                            text: comment_buffer.drain(..).collect(),
-                        });
-                    }
-                }
-
-                if end.is_some() {
-                    let name_string = name.to_string();
-                    let values = enum_frame.values.drain(..).collect();
-                    parsing_mode.pop();
-                    match parsing_mode.last_mut() {
-                        Some(Mode::Normal(ref mut frame))
-                        | Some(Mode::Class(_, _, ref mut frame, _)) => frame.enums.push(Symbol {
-                            name: name_string,
-                            args: Some(SymbolArgs::EnumArgs(values)),
-                            text: comment_buffer.drain(..).collect(),
-                        }),
-                        Some(Mode::Enum(_, _)) => {
-                            panic!("[parser.rs] Unexpected Enum value after completed enum")
-                        }
-                        None => panic!("[parser.rs] Unexpected end of parsing_mode stack"),
-                    }
-                }
-            }
-
-            Mode::Class(_, (ref old_indent, ref mut indent), ref mut frame, _) => {
-                if full_line.trim().is_empty() {
-                    continue;
-                }
-                if indent.is_none() {
-                    if indentation_level > *old_indent {
-                        *indent = Some(indentation_level);
-                    } else {
-                        return Err(format!(
-                            "Failed to parse {}, line {}: Indented block expected",
-                            filename,
-                            lines.lineno()
-                        ));
-                    }
-                }
-                let indent = indent.unwrap();
-                if indentation_level == indent {
-                    if let Some(m) = parse_class_content(
-                        filename,
-                        lines.lineno(),
-                        &full_line.trim(),
-                        indentation_level,
-                        frame,
-                        &mut comment_buffer,
-                        settings,
-                        &mut override_visibility,
-                    )? {
-                        parsing_mode.push(m);
-                    }
-                } else if indentation_level < indent {
-                    let mut entries = Vec::new();
-                    let comments;
-                    let class_name;
-                    if let Mode::Class(name, _, frame, text) = parsing_mode.pop().unwrap() {
-                        class_name = name;
-                        add_entries(&mut entries, frame);
-
-                        comments = text;
-                    } else {
-                        panic!()
-                    }
-
-                    match parsing_mode.last_mut() {
-                        Some(Mode::Normal(ref mut frame))
-                        | Some(Mode::Class(_, _, ref mut frame, _)) => frame.classes.push(Symbol {
-                            name: class_name,
-                            args: Some(SymbolArgs::ClassArgs(entries)),
-                            text: comments,
-                        }),
-                        Some(Mode::Enum(_, _)) => {
-                            panic!("[parser.rs] Unexpected Enum value after completed class")
-                        }
-                        None => panic!("[parser.rs] Unexpected end of parsing_mode stack"),
-                    }
-                }
-            }
-
-            Mode::Normal(ref mut frame) => {
-                if let Some(new_frame) = parse_class_content(
-                    filename,
-                    lines.lineno(),
-                    full_line.as_str(),
-                    indentation_level,
-                    frame,
-                    &mut comment_buffer,
-                    settings,
-                    &mut override_visibility,
-                )? {
-                    parsing_mode.push(new_frame);
-                }
-            }
-        }
-        if !full_line.is_empty() {
+        if !full_line.trim().is_empty() {
+            parse_line(
+                filename,
+                lines.lineno(),
+                settings,
+                parsing_mode.pop().unwrap(),
+                &mut parsing_mode,
+                full_line,
+                &mut override_visibility,
+                &mut comment_buffer,
+                indentation_level,
+            )?;
             comment_buffer.clear();
             override_visibility = None;
         }
@@ -495,6 +582,7 @@ fn parse_class_content(
     comment_buffer: &mut Vec<String>,
     settings: &Settings,
     override_visibility: &mut Option<bool>,
+    parsing_mode: &Vec<Mode>,
 ) -> Result<Option<Mode>, String> {
     if line.starts_with("class ") {
         let name = line[5..].split(':').next().unwrap().trim().to_string();
@@ -687,44 +775,15 @@ fn parse_class_content(
             Some(x) => &line[pos + 1..x],
             None => &line[pos + 1..],
         };
-        for v in slice.split(',') {
-            let mut arg_iterator = v.split('=');
 
-            let name = arg_iterator
-                .next()
-                .ok_or("Expected name for enum value")?
-                .trim();
-            if name.is_empty() {
-                continue;
-            }
-            let value = arg_iterator
-                .next()
-                .and_then(|x| {
-                    let raw = x.trim();
-                    let res = raw.parse();
-                    if let Err(_) = res {
-                        // TODO:
-                        // Try to resolve it from a constant value
-
-                        return Some(Err(format!("'{}' is not a valid enum value", x.trim())));
-                    }
-
-                    Some(Ok(res.unwrap()))
-                })
-                .unwrap_or(Ok(enum_frame.last_value))?;
-
-            enum_frame.last_value = value + 1;
-
-            if (!name.starts_with("_") || settings.show_prefixed)
-                && override_visibility.unwrap_or(true)
-            {
-                enum_frame.values.push(EnumValue {
-                    name: name.to_string(),
-                    value: value,
-                    text: Vec::new(),
-                });
-            }
-        }
+        parse_enum(
+            settings,
+            parsing_mode,
+            slice,
+            &mut enum_frame,
+            override_visibility,
+            comment_buffer,
+        )?;
 
         if end.is_some() {
             frame.enums.push(Symbol {
