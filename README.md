@@ -65,6 +65,27 @@ This will be the result:
         ```
 
   
+### Enums:  
+* MyEnum  
+    **Values**:  
+    * FIRST = 0  
+      
+    ```
+    This is the first entry
+    ```
+
+  
+    * SECOND = 1  
+    * GAP = 42  
+      
+    ```
+    Here we have a gap in the numbering
+    ```
+
+  
+    * LAST = 43  
+  
+  
 ### Exports:  
 * my\_export: (int, 1, 8) = `5`  
   
