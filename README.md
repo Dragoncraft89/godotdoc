@@ -5,7 +5,7 @@ GodotDoc is a documentation generator for GdScript.
 It extracts all symbols and the surrounding comments and generates a markdown file for display in, e.g. github.
 
 Consider the following example:  
-```
+```gdscript
 # This comment is a description of the method foo
 func foo(id):
 	return id + 42
