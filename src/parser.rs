@@ -89,7 +89,7 @@ pub enum SymbolArgs {
 
 pub struct Symbol {
     pub name: String,
-    pub args: Option<SymbolArgs>,
+    pub arg: Option<SymbolArgs>,
     pub text: Vec<String>,
 }
 
@@ -184,19 +184,17 @@ enum Mode {
 }
 
 fn get_constant(stack: &Vec<Mode>, raw: &str) -> Option<String> {
-    let mut val = None;
-    for frame in stack {
+    for frame in stack.iter().rev() {
         match frame {
             Mode::Class(_, _, class_frame, _) | Mode::Normal(class_frame) => {
                 for v in &class_frame.constants {
                     if v.name == raw {
-                        for arg in &v.args {
-                            match arg {
-                                SymbolArgs::VariableArgs(VariableArgStruct {
-                                    assignment, ..
-                                }) => val = assignment.clone(),
-                                _ => {}
-                            };
+                        if let Some(SymbolArgs::VariableArgs(VariableArgStruct {
+                            assignment,
+                            ..
+                        })) = &v.arg
+                        {
+                            return assignment.clone();
                         }
                     }
                 }
@@ -205,7 +203,7 @@ fn get_constant(stack: &Vec<Mode>, raw: &str) -> Option<String> {
         }
     }
 
-    val
+    None
 }
 
 fn parse_enum(
@@ -300,7 +298,7 @@ fn parse_line(
                     Some(Mode::Normal(ref mut frame))
                     | Some(Mode::Class(_, _, ref mut frame, _)) => frame.enums.push(Symbol {
                         name: name_string,
-                        args: Some(SymbolArgs::EnumArgs(values)),
+                        arg: Some(SymbolArgs::EnumArgs(values)),
                         text: comment_buffer.drain(..).collect(),
                     }),
                     Some(Mode::Enum(_, _)) => {
@@ -354,7 +352,7 @@ fn parse_line(
                     Some(Mode::Normal(ref mut frame))
                     | Some(Mode::Class(_, _, ref mut frame, _)) => frame.classes.push(Symbol {
                         name: name,
-                        args: Some(SymbolArgs::ClassArgs(entries)),
+                        arg: Some(SymbolArgs::ClassArgs(entries)),
                         text: comments,
                     }),
                     Some(Mode::Enum(_, _)) => {
@@ -487,7 +485,7 @@ pub fn parse_file(
                     Some(Mode::Normal(ref mut frame))
                     | Some(Mode::Class(_, _, ref mut frame, _)) => frame.classes.push(Symbol {
                         name: class_name,
-                        args: Some(SymbolArgs::ClassArgs(entries)),
+                        arg: Some(SymbolArgs::ClassArgs(entries)),
                         text: comments,
                     }),
                     Some(Mode::Enum(_, _)) => {
@@ -503,7 +501,7 @@ pub fn parse_file(
                     Some(Mode::Normal(ref mut frame))
                     | Some(Mode::Class(_, _, ref mut frame, _)) => frame.enums.push(Symbol {
                         name: name_string,
-                        args: Some(SymbolArgs::EnumArgs(values)),
+                        arg: Some(SymbolArgs::EnumArgs(values)),
                         text: comment_buffer.drain(..).collect(),
                     }),
                     Some(Mode::Enum(_, _)) => {
@@ -601,7 +599,7 @@ fn parse_class_content(
         {
             frame.signals.push(Symbol {
                 name: name,
-                args: None,
+                arg: None,
                 text: comment_buffer.drain(..).collect(),
             });
         }
@@ -623,7 +621,7 @@ fn parse_class_content(
         {
             frame.functions.push(Symbol {
                 name: name,
-                args: Some(SymbolArgs::FunctionArgs(FunctionArgStruct {
+                arg: Some(SymbolArgs::FunctionArgs(FunctionArgStruct {
                     arguments: arguments,
                     super_arguments: super_arguments,
                     return_type: return_type,
@@ -652,7 +650,7 @@ fn parse_class_content(
         {
             frame.variables.push(Symbol {
                 name: name,
-                args: Some(SymbolArgs::VariableArgs(VariableArgStruct {
+                arg: Some(SymbolArgs::VariableArgs(VariableArgStruct {
                     value_type: value_type,
                     assignment: assignment,
                     setter: setter,
@@ -682,7 +680,7 @@ fn parse_class_content(
         {
             frame.constants.push(Symbol {
                 name: name,
-                args: Some(SymbolArgs::VariableArgs(VariableArgStruct {
+                arg: Some(SymbolArgs::VariableArgs(VariableArgStruct {
                     value_type: value_type,
                     assignment: assignment,
                     setter: setter,
@@ -745,7 +743,7 @@ fn parse_class_content(
 
         frame.exports.push(Symbol {
             name: name,
-            args: Some(SymbolArgs::ExportArgs(ExportArgStruct {
+            arg: Some(SymbolArgs::ExportArgs(ExportArgStruct {
                 value_type: export_type.or(value_type),
                 options: options,
                 assignment: assignment,
@@ -788,7 +786,7 @@ fn parse_class_content(
         if end.is_some() {
             frame.enums.push(Symbol {
                 name: enum_name,
-                args: Some(SymbolArgs::EnumArgs(enum_frame.values)),
+                arg: Some(SymbolArgs::EnumArgs(enum_frame.values)),
                 text: comment_buffer.drain(..).collect(),
             });
         } else {

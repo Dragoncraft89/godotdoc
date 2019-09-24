@@ -90,15 +90,20 @@ fn main() {
         .or(matches.value_of("hide_prefixed").map(|_| false));
     let config;
     if let Ok(f) = File::open(Path::new(input_dir).join("godotdoc_config.json")) {
-        config = handle_error(serde_json::from_reader(f), "Error while reading config file");
+        config = handle_error(
+            serde_json::from_reader(f),
+            "Error while reading config file",
+        );
     } else {
         config = Configuration::default();
     }
 
     let config_backend = config.backend.as_ref().map(|s| s.as_str());
-    let backend: Box<dyn Backend> =
-        handle_error(get_backend(matches.value_of("backend").or(config_backend)), "Error");
-    
+    let backend: Box<dyn Backend> = handle_error(
+        get_backend(matches.value_of("backend").or(config_backend)),
+        "Error",
+    );
+
     let settings = Settings {
         backend: backend,
         output_path: Path::new(output_dir),
@@ -107,15 +112,23 @@ fn main() {
             .excluded_files
             .unwrap_or(Vec::new())
             .drain(..)
-            .map(|s| handle_error(Pattern::new(s.as_str()).map_err(|e| e.to_string()), "Couldn't parse pattern"))
+            .map(|s| {
+                handle_error(
+                    Pattern::new(s.as_str()).map_err(|e| e.to_string()),
+                    "Couldn't parse pattern",
+                )
+            })
             .collect(),
         show_prefixed: show_prefixed.or(config.show_prefixed).unwrap_or(true),
     };
-    handle_error(traverse_directory(
-        Path::new(input_dir).to_path_buf(),
-        Path::new(".").to_path_buf(),
-        &settings,
-    ), "Error")
+    handle_error(
+        traverse_directory(
+            Path::new(input_dir).to_path_buf(),
+            Path::new(".").to_path_buf(),
+            &settings,
+        ),
+        "Error",
+    )
 }
 
 fn get_backend(name: Option<&str>) -> Result<Box<dyn Backend>, String> {

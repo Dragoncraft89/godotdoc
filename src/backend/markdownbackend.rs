@@ -66,7 +66,7 @@ fn write_symbols(
             let sanitized_name = sanitize_markdown(entry.name);
 
             write!(f, "{}    * {}", prefix, sanitized_name)?;
-            if let Some(args) = entry.args {
+            if let Some(args) = entry.arg {
                 match args {
                     SymbolArgs::FunctionArgs(FunctionArgStruct {
                         arguments,
@@ -177,7 +177,7 @@ impl Backend for MarkdownBackend {
                 let sanitized_name = sanitize_markdown(entry.name);
 
                 write!(f, "* {}", sanitized_name)?;
-                if let Some(args) = entry.args {
+                if let Some(args) = entry.arg {
                     match args {
                         SymbolArgs::FunctionArgs(FunctionArgStruct {
                             arguments,
