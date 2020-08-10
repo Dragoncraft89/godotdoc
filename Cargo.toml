@@ -3,6 +3,14 @@ name = "godotdoc"
 version = "0.1.0"
 authors = ["Florian Kothmeier <floriankothmeier@web.de>"]
 edition = "2018"
+license = "GPL-3.0-only"
+description = "GodotDoc is a documentation generator for GdScript."
+readme = "README.md"
+repository = "https://github.com/Dragoncraft89/godotdoc/"
+exclude = [
+    "test.gd",
+    "test.gd.md"
+]
 
 
 [dependencies]
